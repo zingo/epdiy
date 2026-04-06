@@ -6,7 +6,8 @@ This fork of the EPDiy library has been updated with **ESP-IDF 5.5.1 compatibili
 ## Features
 
 - ✅ **ESP-IDF 5.5.1 Support** - Full compatibility with the latest ESP-IDF framework
-- ✅ **M5Stack PaperS3** - Optimized for M5Stack's e-paper display device
+- ✅ **M5Stack Paper** - Optimized for M5Stack's first e-paper display device using ESP32
+- ✅ **M5Stack PaperS3** - Optimized for M5Stack's updated e-paper display device using ESP32S3
 - ✅ **ESPHome Integration** - Easy integration with Home Assistant via ESPHome
 - ✅ **Backward Compatible** - Works with ESP-IDF 4.x, 5.0-5.4, and 5.5+
 
@@ -92,16 +93,24 @@ See [lcd_driver.c](src/output_lcd/lcd_driver.c) for implementation details.
 
 ## Example Configuration
 
-A complete example configuration is available in [papers3.yaml](papers3.yaml) showing:
+A complete example configuration is available in [m5papers3.yaml](m5papers3.yaml) showing:
 - Display setup for M5Stack PaperS3
 - 12 text lines with Home Assistant integration
 - Touch screen support (GT911)
 - Battery monitoring
 - RTC (PCF8563/BM8563) with time sync
 
+And a configuration for the first M5 Stack Paper is available in [m5paper.yaml](m5paper.yaml) showing:
+- Display setup for M5Stack PaperS3
+- 12 text lines with Home Assistant integration
+- Touch screen support (GT911)
+- Battery monitoring
+- RTC (PCF8563/BM8563) with time sync
+- And some connections and other debug info
+
 ## Requirements
 
-- ESP32-S3 microcontroller (M5Stack PaperS3)
+- ESP32-S3 microcontroller (M5Stack PaperS3 or first ESP32 based M5Stack Paper)
 - ESPHome 2024.11.0 or newer
 - Home Assistant (for remote control)
 - PSRAM (required for framebuffer allocation)
@@ -109,6 +118,7 @@ A complete example configuration is available in [papers3.yaml](papers3.yaml) sh
 ## Supported Displays
 
 - ED047TC1 (4.7" - M5Stack PaperS3)
+- IT8951E (4.7" - M5Stack Paper)
 - ED060SC4, ED060SCT, ED060XC3 (6")
 - ED097OC4, ED097TC2 (9.7")
 - ED133UT2 (13.3")

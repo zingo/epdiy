@@ -1,7 +1,7 @@
 esphome:
   name: m5papers3
   friendly_name: m5papers3
-  build_path: /config/esphome/m5papers3
+  build_path: ./build/m5papers3
   platformio_options:
     build_flags: "-DBOARD_HAS_PSRAM"
   libraries:
