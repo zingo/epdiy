@@ -1,0 +1,522 @@
+esphome:
+  name: m5paper-weather
+  friendly_name: M5Paper Weather Display
+  build_path: ./build/m5paper-weather
+  includes:
+    - weather_icons.h
+  platformio_options:
+    build_flags: "-DBOARD_HAS_PSRAM"
+  on_boot:
+    priority: -100
+    then:
+      - it8951e.clear:
+      - delay: 500ms
+      - component.update: weather_display
+      - lambda: |-
+          id(system_initialized) = true;
+
+esp32:
+  board: m5stack_paper
+  flash_size: 16MB
+  framework:
+    type: arduino
+
+globals:
+  - id: system_initialized
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+psram:
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  baud_rate: 115200
+  logs:
+    wifi: WARN
+    esp-idf: WARN
+    homeassistant: DEBUG
+    api: DEBUG
+    sensor: DEBUG
+
+api:
+  reboot_timeout: 6h
+  services:
+    - service: update_display
+      then:
+        - component.update: weather_display
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 6h
+  power_save_mode: LIGHT
+
+external_components:
+  - source: github://Passific/m5paper_esphome
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+  id: bus_internal
+  frequency: 200kHz
+
+# ============================================
+# WEATHER SENSORS FROM HOME ASSISTANT
+# ============================================
+sensor:
+  # OpenWeatherMap sensors
+  - platform: homeassistant
+    id: weather_temperature
+    entity_id: sensor.openweathermap_temperatur
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(system_initialized);'
+            then:
+              - component.update: weather_display
+
+  - platform: homeassistant
+    id: weather_humidity
+    entity_id: sensor.openweathermap_luftfuktighet
+
+  - platform: homeassistant
+    id: weather_pressure
+    entity_id: sensor.openweathermap_tryck
+
+  - platform: homeassistant
+    id: weather_wind_speed
+    entity_id: sensor.openweathermap_vindhastighet
+
+  - platform: homeassistant
+    id: weather_feels_like
+    entity_id: sensor.openweathermap_skenbar_temperatur
+
+  - platform: homeassistant
+    id: weather_uv_index
+    entity_id: sensor.openweathermap_uv_index
+
+  - platform: homeassistant
+    id: weather_wind_gust
+    entity_id: sensor.openweathermap_hastighet_i_vindbyar
+
+  - platform: homeassistant
+    id: weather_visibility
+    entity_id: sensor.openweathermap_synlighet
+
+  - platform: homeassistant
+    id: weather_cloud_coverage
+    entity_id: sensor.openweathermap_molntackning
+
+  # Device sensors
+  - platform: sht3xd
+    address: 0x44
+    temperature:
+      name: "M5Paper Temperature"
+      id: m5paper_temp
+    humidity:
+      name: "M5Paper Humidity"
+      id: m5paper_humidity
+    update_interval: 60s
+
+  - platform: adc
+    pin: GPIO35
+    name: "Battery Voltage"
+    id: battery_voltage
+    update_interval: 60s
+    attenuation: 12db
+    filters:
+      - multiply: 2.0
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: m5paper_wifi_signal
+    update_interval: 60s
+
+text_sensor:
+  - platform: homeassistant
+    id: weather_condition
+    entity_id: sensor.openweathermap_skick
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(system_initialized);'
+            then:
+              - component.update: weather_display
+
+  - platform: homeassistant
+    id: weather_forecast_0
+    entity_id: weather.openweathermap
+    attribute: forecast[0].condition
+
+  - platform: homeassistant
+    id: weather_forecast_temp_0
+    entity_id: weather.openweathermap
+    attribute: forecast[0].temperature
+
+  - platform: template
+    name: "API Connection Status"
+    id: api_status
+    lambda: |-
+      return api_is_connected() ? "connected" : "disconnected";
+
+binary_sensor:
+  - platform: gpio
+    name: "Left Button"
+    pin:
+      number: GPIO37
+      inverted: true
+    on_press:
+      - component.update: weather_display
+  - platform: gpio
+    name: "Push Button"
+    pin:
+      number: GPIO38
+      inverted: true
+  - platform: gpio
+    name: "Right Button"
+    pin:
+      number: GPIO39
+      inverted: true
+    on_press:
+      - component.update: weather_display
+
+# ============================================
+# TIME SYNCHRONIZATION
+# ============================================
+time:
+  - platform: bm8563
+    id: rtc_time
+    address: 0x51
+    update_interval: never
+
+  - platform: homeassistant
+    id: ha_time
+    timezone: Europe/Berlin
+    update_interval: 1h
+    on_time_sync:
+      then:
+        - bm8563.write_time:
+            id: rtc_time
+
+# ============================================
+# DISPLAY UPDATE INTERVALS
+# ============================================
+interval:
+  # Full display refresh every 6 hours (anti-ghosting)
+  - interval: 6h
+    then:
+      - logger.log: "Full display refresh"
+      - component.update: weather_display
+
+  # Periodic update for time display
+  - interval: 1min
+    then:
+      - component.update: weather_display
+
+# ============================================
+# HARDWARE COMPONENTS
+# ============================================
+m5paper:
+  battery_power_pin: GPIO5
+  main_power_pin: GPIO2
+
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO12
+  miso_pin: GPIO13
+
+touchscreen:
+  - platform: gt911
+    display: weather_display
+    id: touch_panel
+    calibration:
+      x_min: 0
+      x_max: 540
+      y_min: 0
+      y_max: 960
+    on_touch:
+      - lambda: |-
+          ESP_LOGI("touch", "x=%d, y=%d", touch.x, touch.y);
+      - component.update: weather_display
+
+# ============================================
+# FONTS
+# ============================================
+font:
+  # Large font for main temperature
+  - file: "gfonts://Roboto@700"
+    id: font_large
+    size: 120
+
+  # Medium font for details
+  - file: "gfonts://Roboto"
+    id: font_medium
+    size: 48
+
+  # Small font for labels
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 32
+
+  # Tiny font for additional info
+  - file: "gfonts://Roboto"
+    id: font_tiny
+    size: 24
+
+# ============================================
+# WEATHER DISPLAY
+# ============================================
+display:
+  - platform: it8951e
+    id: weather_display
+    model: M5EPD
+    cs_pin: GPIO15
+    reset_pin: GPIO23
+    busy_pin: GPIO27
+    rotation: 90
+    reversed: false
+    update_interval: never
+    auto_clear_enabled: true
+    sleep_when_done: false
+    lambda: |-
+      // Screen dimensions (after 90° rotation)
+      #define SCREEN_W 540
+      #define SCREEN_H 960
+
+      // Colors (for E-Ink: 0x00=black, 0xFF=white)
+      #define BLACK 0x00
+      #define WHITE 0xFF
+      #define GRAY 0x88
+
+      // ========================================
+      // WEATHER ICON SELECTION
+      // ========================================
+      const uint8_t* weather_icon_data = nullptr;
+      uint32_t icon_width = 0;
+      uint32_t icon_height = 0;
+
+      std::string condition = id(weather_condition).state;
+      ESP_LOGD("weather", "Weather condition: %s", condition.c_str());
+
+      if (condition == "sunny" || condition == "clear") {
+        weather_icon_data = weather_sunny_data;
+        icon_width = weather_sunny_width;
+        icon_height = weather_sunny_height;
+        ESP_LOGD("weather", "Selected icon: sunny");
+      }
+      else if (condition == "clear-night") {
+        weather_icon_data = weather_clear_night_data;
+        icon_width = weather_clear_night_width;
+        icon_height = weather_clear_night_height;
+        ESP_LOGD("weather", "Selected icon: clear-night");
+      }
+      else if (condition == "cloudy") {
+        weather_icon_data = weather_cloudy_data;
+        icon_width = weather_cloudy_width;
+        icon_height = weather_cloudy_height;
+        ESP_LOGD("weather", "Selected icon: cloudy");
+      }
+      else if (condition == "partlycloudy") {
+        weather_icon_data = weather_partlycloudy_data;
+        icon_width = weather_partlycloudy_width;
+        icon_height = weather_partlycloudy_height;
+        ESP_LOGD("weather", "Selected icon: partlycloudy");
+      }
+      else if (condition == "rainy" || condition == "rain") {
+        weather_icon_data = weather_rainy_data;
+        icon_width = weather_rainy_width;
+        icon_height = weather_rainy_height;
+        ESP_LOGD("weather", "Selected icon: rainy");
+      }
+      else if (condition == "pouring") {
+        weather_icon_data = weather_pouring_data;
+        icon_width = weather_pouring_width;
+        icon_height = weather_pouring_height;
+        ESP_LOGD("weather", "Selected icon: pouring");
+      }
+      else if (condition == "snowy" || condition == "snow") {
+        weather_icon_data = weather_snowy_data;
+        icon_width = weather_snowy_width;
+        icon_height = weather_snowy_height;
+        ESP_LOGD("weather", "Selected icon: snowy");
+      }
+      else if (condition == "fog" || condition == "foggy") {
+        weather_icon_data = weather_fog_data;
+        icon_width = weather_fog_width;
+        icon_height = weather_fog_height;
+        ESP_LOGD("weather", "Selected icon: fog");
+      }
+      else if (condition == "windy") {
+        weather_icon_data = weather_windy_data;
+        icon_width = weather_windy_width;
+        icon_height = weather_windy_height;
+        ESP_LOGD("weather", "Selected icon: windy");
+      }
+      else if (condition == "hail") {
+        weather_icon_data = weather_hail_data;
+        icon_width = weather_hail_width;
+        icon_height = weather_hail_height;
+        ESP_LOGD("weather", "Selected icon: hail");
+      }
+      else if (condition == "lightning" || condition == "lightning-rainy") {
+        weather_icon_data = weather_lightning_data;
+        icon_width = weather_lightning_width;
+        icon_height = weather_lightning_height;
+        ESP_LOGD("weather", "Selected icon: lightning");
+      }
+      else {
+        ESP_LOGW("weather", "Unknown condition: %s", condition.c_str());
+      }
+
+      // ========================================
+      // HEADER: DATE & TIME
+      // ========================================
+      it.strftime(SCREEN_W/2, 30, id(font_small), TextAlign::TOP_CENTER,
+                  "%A, %d. %B %Y", id(rtc_time).now());
+
+      it.strftime(SCREEN_W/2, 85, id(font_large), TextAlign::TOP_CENTER,
+                  "%H:%M", id(rtc_time).now());
+
+      // Separator line
+      it.line(40, 220, SCREEN_W-40, 220);
+
+      // ========================================
+      // MAIN SECTION: TEMPERATURE & ICON
+      // ========================================
+
+      // Weather icon (left) - Draw 4-bit packed image data directly
+      if (weather_icon_data != nullptr && icon_width > 0 && icon_height > 0) {
+        int icon_x = 60;
+        int icon_y = 260;
+        
+        // Draw 4-bit packed image (2 pixels per byte)
+        // Icon data is inverted: 0x0=white, 0xF=black
+        for (uint32_t y = 0; y < icon_height; y++) {
+          for (uint32_t x = 0; x < icon_width; x += 2) {
+            uint32_t src_byte_index = (y * icon_width + x) / 2;
+            uint8_t src_byte = weather_icon_data[src_byte_index];
+            
+            // Extract two 4-bit pixels
+            uint8_t pixel1 = (src_byte >> 4) & 0x0F;  // Even x
+            uint8_t pixel2 = src_byte & 0x0F;          // Odd x
+            
+            // Invert the 4-bit values (icon data is inverted)
+            // Icon: 0x0=white, 0xF=black
+            // Need: Color(255,255,255)=white, Color(0,0,0)=black
+            uint8_t gray1 = (15 - pixel1) * 17;
+            uint8_t gray2 = (15 - pixel2) * 17;
+            
+            it.draw_pixel_at(icon_x + x, icon_y + y, Color(gray1, gray1, gray1));
+            if (x + 1 < icon_width) {
+              it.draw_pixel_at(icon_x + x + 1, icon_y + y, Color(gray2, gray2, gray2));
+            }
+          }
+        }
+      }
+
+      // Main temperature (right of icon)
+      if (id(weather_temperature).has_state()) {
+        it.printf(340, 290, id(font_large), TextAlign::CENTER,
+                  "%.1f°C", id(weather_temperature).state);
+        //it.printf(340, 400, id(font_medium), TextAlign::CENTER, "C");
+      }
+
+      // Weather condition as text
+      it.printf(SCREEN_W/2, 470, id(font_medium), TextAlign::TOP_CENTER,
+                "%s", condition.c_str());
+
+      // ========================================
+      // DETAILS SECTION (3 columns)
+      // ========================================
+      int details_y = 570;
+      int col_spacing = SCREEN_W / 3;
+
+      // Column 1: Humidity
+      it.printf(col_spacing/2, details_y, id(font_small), TextAlign::TOP_CENTER,
+                "Humidity");
+      if (id(weather_humidity).has_state()) {
+        it.printf(col_spacing/2, details_y+40, id(font_medium), TextAlign::TOP_CENTER,
+                  "%.0f%%", id(weather_humidity).state);
+      }
+
+      // Column 2: Feels like temperature
+      it.printf(SCREEN_W/2, details_y, id(font_small), TextAlign::TOP_CENTER,
+                "Feels like");
+      if (id(weather_feels_like).has_state()) {
+        it.printf(SCREEN_W/2, details_y+40, id(font_medium), TextAlign::TOP_CENTER,
+                  "%.1f°C", id(weather_feels_like).state);
+      }
+
+      // Column 3: Pressure
+      it.printf(SCREEN_W-col_spacing/2, details_y, id(font_small), TextAlign::TOP_CENTER,
+                "Pressure");
+      if (id(weather_pressure).has_state()) {
+        it.printf(SCREEN_W-col_spacing/2, details_y+40, id(font_medium), TextAlign::TOP_CENTER,
+                  "%.0f", id(weather_pressure).state);
+        it.printf(SCREEN_W-col_spacing/2, details_y+90, id(font_small), TextAlign::TOP_CENTER,
+                  "hPa");
+      }
+
+      // ========================================
+      // ADDITIONAL INFO: Wind & UV Index
+      // ========================================
+      int extra_y = 730;
+
+      // Wind
+      if (id(weather_wind_speed).has_state()) {
+        it.printf(SCREEN_W/3, extra_y, id(font_small), TextAlign::TOP_CENTER,
+                  "Wind: %.1f km/h", id(weather_wind_speed).state);
+      }
+
+      // UV-Index
+      if (id(weather_uv_index).has_state()) {
+        it.printf(2*SCREEN_W/3, extra_y, id(font_small), TextAlign::TOP_CENTER,
+                  "UV: %.1f", id(weather_uv_index).state);
+      }
+
+      // Cloudiness
+      if (id(weather_cloud_coverage).has_state()) {
+        it.printf(SCREEN_W/2, extra_y+40, id(font_small), TextAlign::TOP_CENTER,
+                  "Cloudiness: %.0f%%", id(weather_cloud_coverage).state);
+      }
+
+      // ========================================
+      // FOOTER: BATTERY & STATUS
+      // ========================================
+      int footer_y = SCREEN_H - 60;
+
+      // Battery voltage
+      if (id(battery_voltage).has_state()) {
+        float battery_v = id(battery_voltage).state;
+
+        it.printf(40, footer_y, id(font_tiny), TextAlign::BOTTOM_LEFT,
+                  "Bat: %.2fV", battery_v);
+
+        // Battery percentage (rough estimate for LiPo)
+        float percent = (battery_v - 3.3) / (4.2 - 3.3) * 100.0;
+        percent = max(0.0f, min(100.0f, percent));
+        it.printf(40, footer_y+30, id(font_tiny), TextAlign::BOTTOM_LEFT,
+                  "%.0f%%", percent);
+      }
+
+      // WiFi status
+      it.printf(SCREEN_W/2, footer_y, id(font_tiny), TextAlign::BOTTOM_CENTER,
+                "WiFi: %s", id(api_status).state.c_str());
+
+      // Last update
+      it.strftime(SCREEN_W-40, footer_y, id(font_tiny), TextAlign::BOTTOM_RIGHT,
+                  "Last: %H:%M", id(rtc_time).now());
+
+      // Device temperature
+      if (id(m5paper_temp).has_state()) {
+        it.printf(SCREEN_W-40, footer_y+30, id(font_tiny), TextAlign::BOTTOM_RIGHT,
+                  "Dev: %.1f°C", id(m5paper_temp).state);
+      }
