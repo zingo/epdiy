@@ -165,7 +165,7 @@ text_sensor:
     name: "API Connection Status"
     id: api_status
     lambda: |-
-      return api_is_connected() ? "connected" : "disconnected";
+      return api_is_connected() ? "Connected" : "Disconnected";
 
 binary_sensor:
   - platform: gpio
@@ -394,8 +394,8 @@ display:
 
       // Weather icon (left) - Draw 4-bit packed image data directly
       if (weather_icon_data != nullptr && icon_width > 0 && icon_height > 0) {
-        int icon_x = 60;
-        int icon_y = 260;
+        int icon_x = (SCREEN_W/2)-(icon_width/2); //60;
+        int icon_y = 230;
         
         // Draw 4-bit packed image (2 pixels per byte)
         // Icon data is inverted: 0x0=white, 0xF=black
@@ -422,16 +422,16 @@ display:
         }
       }
 
-      // Main temperature (right of icon)
+      // Weather condition as text
+      it.printf(SCREEN_W/2, 370, id(font_medium), TextAlign::TOP_CENTER,
+                "%s", condition.c_str());
+
+      // Main temperature (below of icon)
       if (id(weather_temperature).has_state()) {
-        it.printf(340, 290, id(font_large), TextAlign::CENTER,
+        it.printf(SCREEN_W/2, 500, id(font_large), TextAlign::CENTER,
                   "%.1f°C", id(weather_temperature).state);
         //it.printf(340, 400, id(font_medium), TextAlign::CENTER, "C");
       }
-
-      // Weather condition as text
-      it.printf(SCREEN_W/2, 470, id(font_medium), TextAlign::TOP_CENTER,
-                "%s", condition.c_str());
 
       // ========================================
       // DETAILS SECTION (3 columns)
