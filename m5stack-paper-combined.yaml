@@ -12,11 +12,16 @@ esphome:
   on_boot:
     priority: -100
     then:
+      - lambda: |-
+          // Enable ext1 wakeup for GPIO37, 38, 39 (buttons)
+          uint64_t wakeup_mask = (1ULL << 37) | (1ULL << 38) | (1ULL << 39);
+          esp_sleep_enable_ext1_wakeup(wakeup_mask, ESP_EXT1_WAKEUP_ALL_LOW);
       - it8951e.clear:
       - delay: 500ms
       - component.update: main_display
       - lambda: |-
           id(system_initialized) = true;
+      - script.execute: enter_deep_sleep
 
 esp32:
   board: m5stack_paper
@@ -33,22 +38,56 @@ globals:
     type: int
     restore_value: no
     initial_value: '0'
+  - id: prevent_sleep
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: api_ready
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+script:
+  - id: enter_deep_sleep
+    then:
+      - wait_until:
+          condition:
+            lambda: 'return id(api_ready);'
+          timeout: 30s
+      - delay: 10s
+      - component.update: main_display
+      - delay: 2s
+      - if:
+          condition:
+            lambda: 'return !id(prevent_sleep);'
+          then:
+            - logger.log: "Entering deep sleep"
+            - deep_sleep.enter:
+                id: deep_sleep_1
 
 psram:
   speed: 80MHz
 
+deep_sleep:
+  id: deep_sleep_1
+  sleep_duration: 10min
+
 logger:
-  level: DEBUG
+  level: WARN
   baud_rate: 115200
   logs:
     wifi: WARN
     esp-idf: WARN
-    homeassistant: DEBUG
-    api: DEBUG
-    sensor: DEBUG
+    homeassistant: WARN
+    api: WARN
+    sensor: WARN
 
 api:
   reboot_timeout: 6h
+  on_client_connected:
+    then:
+      - lambda: 'id(api_ready) = true;'
+      - logger.log: "API connected"
   services:
     - service: update_display
       then:
@@ -69,6 +108,9 @@ wifi:
   password: !secret wifi_password
   reboot_timeout: 6h
   power_save_mode: LIGHT
+  on_connect:
+    then:
+      - logger.log: "WiFi connected"
 
 external_components:
   - source: github://Passific/m5paper_esphome
@@ -89,11 +131,13 @@ sensor:
     entity_id: sensor.openweathermap_temperatur
     on_value:
       then:
-        - if:
-            condition:
-              lambda: 'return id(system_initialized) && id(current_page) == 0;'
-            then:
-              - component.update: main_display
+        - text_sensor.template.publish:
+            id: weather_last_received
+            state: !lambda |-
+              auto time = id(rtc_time).now();
+              char buf[32];
+              sprintf(buf, "%02d:%02d %02d/%02d", time.hour, time.minute, time.day_of_month, time.month);
+              return std::string(buf);
 
   - platform: homeassistant
     id: weather_humidity
@@ -123,13 +167,6 @@ sensor:
   - platform: homeassistant
     id: allergy_risk
     entity_id: sensor.polleninformation_lund_allergy_risk
-    on_value:
-      then:
-        - if:
-            condition:
-              lambda: 'return id(system_initialized) && id(current_page) != 0;'
-            then:
-              - component.update: main_display
 
   - platform: homeassistant
     id: pollen_alder
@@ -164,13 +201,13 @@ sensor:
     humidity:
       name: "M5Paper Humidity"
       id: m5paper_humidity
-    update_interval: 60s
+    update_interval: 300s
 
   - platform: adc
     pin: GPIO35
     name: "Battery Voltage"
     id: battery_voltage
-    update_interval: 60s
+    update_interval: 300s
     attenuation: 12db
     filters:
       - multiply: 2.0
@@ -178,20 +215,13 @@ sensor:
   - platform: wifi_signal
     name: "WiFi Signal"
     id: m5paper_wifi_signal
-    update_interval: 60s
+    update_interval: 300s
 
 text_sensor:
   # Weather text sensors
   - platform: homeassistant
     id: weather_condition
     entity_id: sensor.openweathermap_skick
-    on_value:
-      then:
-        - if:
-            condition:
-              lambda: 'return id(system_initialized) && id(current_page) == 0;'
-            then:
-              - component.update: main_display
 
   # Pollen text sensors
   - platform: homeassistant
@@ -257,6 +287,15 @@ text_sensor:
     lambda: |-
       return api_is_connected() ? "connected" : "disconnected";
 
+  - platform: template
+    id: weather_last_received
+
+  # Last updated timestamps
+  - platform: homeassistant
+    id: pollen_last_updated
+    entity_id: sensor.polleninformation_lund_allergy_risk
+    attribute: last_updated
+
 binary_sensor:
   - platform: gpio
     name: "Left Button"
@@ -265,14 +304,23 @@ binary_sensor:
       inverted: true
     on_press:
       - lambda: |-
+          id(prevent_sleep) = true;
           id(current_page) = (id(current_page) - 1 + 3) % 3;
-          ESP_LOGI("page", "Left button: page %d", id(current_page));
       - component.update: main_display
+      - delay: 30s
+      - lambda: 'id(prevent_sleep) = false;'
+
   - platform: gpio
-    name: "Push Button"
+    name: "Middle Button"
     pin:
       number: GPIO38
       inverted: true
+    on_press:
+      - lambda: 'id(prevent_sleep) = true;'
+      - component.update: main_display
+      - delay: 30s
+      - lambda: 'id(prevent_sleep) = false;'
+
   - platform: gpio
     name: "Right Button"
     pin:
@@ -280,9 +328,11 @@ binary_sensor:
       inverted: true
     on_press:
       - lambda: |-
+          id(prevent_sleep) = true;
           id(current_page) = (id(current_page) + 1) % 3;
-          ESP_LOGI("page", "Right button: page %d", id(current_page));
       - component.update: main_display
+      - delay: 30s
+      - lambda: 'id(prevent_sleep) = false;'
 
 # ============================================
 # TIME SYNCHRONIZATION
@@ -310,10 +360,12 @@ interval:
     then:
       - logger.log: "Full display refresh"
       - component.update: main_display
+      - script.execute: enter_deep_sleep
 
-  - interval: 1min
+  - interval: 10min
     then:
       - component.update: main_display
+      - script.execute: enter_deep_sleep
 
 # ============================================
 # HARDWARE COMPONENTS
@@ -379,7 +431,7 @@ display:
     reversed: false
     update_interval: never
     auto_clear_enabled: true
-    sleep_when_done: false
+    sleep_when_done: true
     lambda: |-
       // Screen dimensions (after 90° rotation)
       #define SCREEN_W 540
@@ -874,23 +926,37 @@ display:
       // ========================================
       int footer_y = SCREEN_H - 60;
 
+      // Battery percentage only
       if (id(battery_voltage).has_state()) {
         float battery_v = id(battery_voltage).state;
-        it.printf(40, footer_y, id(font_tiny), TextAlign::BOTTOM_LEFT,
-                  "Bat: %.2fV", battery_v);
         float percent = (battery_v - 3.3) / (4.2 - 3.3) * 100.0;
         percent = max(0.0f, min(100.0f, percent));
-        it.printf(40, footer_y+30, id(font_tiny), TextAlign::BOTTOM_LEFT,
-                  "%.0f%%", percent);
+        it.printf(20, footer_y, id(font_tiny), TextAlign::BOTTOM_LEFT,
+                  "Batt: %.0f%%", percent);
       }
 
       it.printf(SCREEN_W/2, footer_y, id(font_tiny), TextAlign::BOTTOM_CENTER,
-                "WiFi: %s", id(api_status).state.c_str());
-
-      it.strftime(SCREEN_W-40, footer_y, id(font_tiny), TextAlign::BOTTOM_RIGHT,
-                  "Last: %H:%M", id(rtc_time).now());
+                "WiFi: %s", api_is_connected() ? "OK" : "--");
 
       if (id(m5paper_temp).has_state()) {
-        it.printf(SCREEN_W-40, footer_y+30, id(font_tiny), TextAlign::BOTTOM_RIGHT,
-                  "Dev: %.1f°C", id(m5paper_temp).state);
+        it.printf(SCREEN_W-20, footer_y, id(font_tiny), TextAlign::BOTTOM_RIGHT,
+                  "Inne: %.1f°C", id(m5paper_temp).state);
       }
+
+      // Last updated times - format: extract HH:MM and DD/MM from ISO timestamp
+      auto format_last = [](const std::string& iso) -> std::string {
+        if (iso.length() < 16) return iso;
+        std::string date = iso.substr(8, 2) + "/" + iso.substr(5, 2);
+        std::string time = iso.substr(11, 5);
+        return time + " " + date;
+      };
+
+      // Build complete last string
+      std::string last_str = "Updated ";
+      if (id(weather_last_received).has_state()) {
+        last_str += "Weather:" + id(weather_last_received).state + " ";
+      }
+      if (id(pollen_last_updated).has_state()) {
+        last_str += "Pollen:" + format_last(id(pollen_last_updated).state);
+      }
+      it.printf(20, footer_y + 30, id(font_tiny), TextAlign::BOTTOM_LEFT, "%s", last_str.c_str());
