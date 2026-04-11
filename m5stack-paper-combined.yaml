@@ -12,10 +12,6 @@ esphome:
   on_boot:
     priority: -100
     then:
-      - lambda: |-
-          // Enable ext1 wakeup for GPIO37, 38, 39 (buttons)
-          uint64_t wakeup_mask = (1ULL << 37) | (1ULL << 38) | (1ULL << 39);
-          esp_sleep_enable_ext1_wakeup(wakeup_mask, ESP_EXT1_WAKEUP_ALL_LOW);
       - it8951e.clear:
       - delay: 500ms
       - component.update: main_display
@@ -62,6 +58,15 @@ script:
             lambda: 'return !id(prevent_sleep);'
           then:
             - logger.log: "Entering deep sleep"
+            - lambda: |-
+                // Check if USB connected (battery voltage > 4.1V means charging)
+                bool usb_connected = false;
+                if (id(battery_voltage).has_state()) {
+                  usb_connected = id(battery_voltage).state > 4.1f;
+                }
+                uint32_t sleep_ms = usb_connected ? 60000 : 600000;  // 1min or 10min
+                ESP_LOGW("sleep", "USB: %s, sleep: %lu ms", usb_connected ? "yes" : "no", sleep_ms);
+                id(deep_sleep_1).set_sleep_duration(sleep_ms);
             - deep_sleep.enter:
                 id: deep_sleep_1
 
