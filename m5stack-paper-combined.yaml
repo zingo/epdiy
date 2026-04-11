@@ -507,7 +507,7 @@ display:
         }
 
         // Wind & UV
-        int extra_y = 730;
+        int extra_y = 700;
         if (id(weather_wind_speed).has_state()) {
           it.printf(SCREEN_W/3, extra_y, id(font_small), TextAlign::TOP_CENTER,
                     "Wind: %.1f km/h", id(weather_wind_speed).state);
@@ -519,6 +519,46 @@ display:
         if (id(weather_cloud_coverage).has_state()) {
           it.printf(SCREEN_W/2, extra_y+40, id(font_small), TextAlign::TOP_CENTER,
                     "Cloudiness: %.0f%%", id(weather_cloud_coverage).state);
+        }
+
+        // Pollen indicators for Björk and Gräs
+        int pollen_y = 800;
+        int pollen_seg_w = 20;
+        int pollen_seg_h = 30;
+        int pollen_gap = 4;
+
+        auto level_from_name_pollen = [](const std::string& name) -> int {
+          if (name == "ingen") return 0;
+          if (name == "låg") return 1;
+          if (name == "måttlig") return 2;
+          if (name == "hög") return 3;
+          if (name == "mycket hög") return 4;
+          return 0;
+        };
+
+        auto draw_small_vu = [&](int x, int y, int level) {
+          for (int i = 0; i < 4; i++) {
+            int seg_x = x + i * (pollen_seg_w + pollen_gap);
+            if (i < level) {
+              it.rectangle(seg_x, y, pollen_seg_w, pollen_seg_h, Color(0, 0, 0));
+              it.filled_rectangle(seg_x + 1, y + 1, pollen_seg_w - 2, pollen_seg_h - 2, Color(255, 255, 255));
+            } else {
+              it.rectangle(seg_x, y, pollen_seg_w, pollen_seg_h, Color(255, 255, 255));
+              it.filled_rectangle(seg_x + 1, y + 1, pollen_seg_w - 2, pollen_seg_h - 2, Color(0, 0, 0));
+            }
+          }
+        };
+
+        // Björk - label at x=30, VU bar at x=160
+        it.printf(30, pollen_y, id(font_small), TextAlign::TOP_LEFT, "Björk:");
+        if (id(pollen_birch_named).has_state()) {
+          draw_small_vu(160, pollen_y, level_from_name_pollen(id(pollen_birch_named).state));
+        }
+
+        // Gräs - label at x=280, VU bar at x=410
+        it.printf(280, pollen_y, id(font_small), TextAlign::TOP_LEFT, "Gräs:");
+        if (id(pollen_grass_named).has_state()) {
+          draw_small_vu(410, pollen_y, level_from_name_pollen(id(pollen_grass_named).state));
         }
       }
 
