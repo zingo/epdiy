@@ -4,8 +4,11 @@ esphome:
   build_path: ./build/m5paper-combined
   includes:
     - weather_icons.h
+    - pollen_forecast.h
   platformio_options:
     build_flags: "-DBOARD_HAS_PSRAM"
+    lib_deps:
+      - bblanchon/ArduinoJson@^6.21.0
   on_boot:
     priority: -100
     then:
@@ -225,6 +228,28 @@ text_sensor:
     id: pollen_grass_named
     entity_id: sensor.polleninformation_lund_grasses
     attribute: named_state
+
+  # Forecast sensors for Björk and Gräs
+  - platform: homeassistant
+    id: pollen_birch_forecast
+    entity_id: sensor.polleninformation_lund_birch
+    attribute: forecast
+
+  - platform: homeassistant
+    id: pollen_grass_forecast
+    entity_id: sensor.polleninformation_lund_grasses
+    attribute: forecast
+
+  # Numeric state sensors
+  - platform: homeassistant
+    id: pollen_birch_numeric
+    entity_id: sensor.polleninformation_lund_birch
+    attribute: numeric_state
+
+  - platform: homeassistant
+    id: pollen_grass_numeric
+    entity_id: sensor.polleninformation_lund_grasses
+    attribute: numeric_state
 
   - platform: template
     name: "API Connection Status"
@@ -677,7 +702,7 @@ display:
         it.line(40, 640, SCREEN_W-40, 640);
 
         // Legend
-        int legend_y = 660;
+        int legend_y = 770;
         int legend_x = 30;
         int leg_seg_w = 18;
         int leg_seg_h = 25;
@@ -708,12 +733,10 @@ display:
       }
 
       // ========================================
-      // PAGE 2: SIMPLIFIED POLLEN (Björk & Gräs)
+      // PAGE 2: DETAILED POLLEN (Björk & Gräs)
       // ========================================
       else if (page == 2) {
         it.line(40, 220, SCREEN_W-40, 220);
-
-        it.printf(SCREEN_W/2, 250, id(font_medium), TextAlign::TOP_CENTER, "Pollenrisk");
 
         auto level_from_name = [](const std::string& name) -> int {
           if (name == "ingen") return 0;
@@ -724,48 +747,99 @@ display:
           return 0;
         };
 
-        // Large VU meter style for simplified view
-        int big_seg_w = 40;
-        int big_seg_h = 60;
-        int big_gap = 8;
-        int center_x = SCREEN_W / 2;
-
-        auto draw_big_vu_bar = [&](int y, const char* label, const std::string& name) {
-          int level = level_from_name(name);
-          int bar_width = 4 * big_seg_w + 3 * big_gap;
-          int start_x = center_x - bar_width / 2;
-
-          it.printf(center_x, y, id(font_medium), TextAlign::TOP_CENTER, "%s", label);
-          
-          int bar_y = y + 60;
-          for (int i = 0; i < 4; i++) {
-            int seg_x = start_x + i * (big_seg_w + big_gap);
-            if (i < level) {
-              it.rectangle(seg_x, bar_y, big_seg_w, big_seg_h, Color(0, 0, 0));
-              it.filled_rectangle(seg_x + 2, bar_y + 2, big_seg_w - 4, big_seg_h - 4, Color(255, 255, 255));
-            } else {
-              it.rectangle(seg_x, bar_y, big_seg_w, big_seg_h, Color(255, 255, 255));
-              it.filled_rectangle(seg_x + 2, bar_y + 2, big_seg_w - 4, big_seg_h - 4, Color(0, 0, 0));
-            }
-          }
-          
-          it.printf(center_x, bar_y + big_seg_h + 15, id(font_small), TextAlign::TOP_CENTER, "%s", name.c_str());
-        };
-
-        // Björk
-        if (id(pollen_birch_named).has_state()) {
-          draw_big_vu_bar(290, "Björk", id(pollen_birch_named).state);
+        // Get forecast levels
+        int birch_levels[4] = {0, 0, 0, 0};
+        int grass_levels[4] = {0, 0, 0, 0};
+        
+        if (id(pollen_birch_forecast).has_state()) {
+          parse_forecast_levels(id(pollen_birch_forecast).state, birch_levels, 4);
+        }
+        if (id(pollen_grass_forecast).has_state()) {
+          parse_forecast_levels(id(pollen_grass_forecast).state, grass_levels, 4);
         }
 
-        it.line(40, 490, SCREEN_W-40, 490);
+        // Draw a VU bar
+        auto draw_vu_bar = [&](int x, int y, int level, int seg_w = 16, int seg_h = 24, int gap = 3) {
+          for (int i = 0; i < 4; i++) {
+            int seg_x = x + i * (seg_w + gap);
+            if (i < level) {
+              it.rectangle(seg_x, y, seg_w, seg_h, Color(0, 0, 0));
+              it.filled_rectangle(seg_x + 1, y + 1, seg_w - 2, seg_h - 2, Color(255, 255, 255));
+            } else {
+              it.rectangle(seg_x, y, seg_w, seg_h, Color(255, 255, 255));
+              it.filled_rectangle(seg_x + 1, y + 1, seg_w - 2, seg_h - 2, Color(0, 0, 0));
+            }
+          }
+        };
 
-        // Gräs
+        // Column layout for current levels
+        int col1_x = 30;
+        int col2_x = 290;
+        int col_w = 220;
+
+        // Header row with current levels
+        int header_y = 250;
+        it.printf(col1_x + col_w/2, header_y, id(font_medium), TextAlign::TOP_CENTER, "Björk");
+        it.printf(col2_x + col_w/2, header_y, id(font_medium), TextAlign::TOP_CENTER, "Gräs");
+
+        // Current level row (no "Just nu" text)
+        int current_y = 310;
+        if (id(pollen_birch_named).has_state()) {
+          draw_vu_bar(col1_x + 60, current_y, level_from_name(id(pollen_birch_named).state), 22, 34, 5);
+        }
         if (id(pollen_grass_named).has_state()) {
-          draw_big_vu_bar(540, "Gräs", id(pollen_grass_named).state);
+          draw_vu_bar(col2_x + 60, current_y, level_from_name(id(pollen_grass_named).state), 22, 34, 5);
+        }
+
+        // Separator
+        it.line(40, 370, SCREEN_W-40, 370);
+
+        // Rotated Forecast table - dates as rows, pollen as columns
+        int table_y = 380;
+        it.printf(SCREEN_W/2, table_y, id(font_medium), TextAlign::TOP_CENTER, "Prognos");
+
+        // Column headers (Björk, Gräs)
+        int col_header_y = table_y + 70;
+        int bjork_col_x = 260;
+        int gras_col_x = 400;
+        it.printf(bjork_col_x, col_header_y, id(font_small), TextAlign::TOP_CENTER, "Björk");
+        it.printf(gras_col_x, col_header_y, id(font_small), TextAlign::TOP_CENTER, "Gräs");
+
+        // Horizontal line under headers
+        it.line(40, col_header_y + 35, SCREEN_W-40, col_header_y + 35);
+
+        // Date rows with forecast bars
+        auto time_now = id(rtc_time).now();
+        int row_h = 70;
+        int fc_seg_w = 20;
+        int fc_seg_h = 30;
+        int fc_gap = 4;
+
+        for (int d = 0; d < 4; d++) {
+          int row_y = col_header_y + 50 + d * row_h;
+          
+          // Date label
+          char date_str[20];
+          if (d == 0) {
+            sprintf(date_str, "Idag");
+          } else if (d == 1) {
+            sprintf(date_str, "Imorgon");
+          } else {
+            int day = time_now.day_of_month + d;
+            int month = time_now.month;
+            sprintf(date_str, "%d/%d", day, month);
+          }
+          it.printf(50, row_y + 5, id(font_small), TextAlign::TOP_LEFT, "%s", date_str);
+
+          // Björk bar - use parsed forecast level
+          draw_vu_bar(bjork_col_x - 45, row_y, birch_levels[d], fc_seg_w, fc_seg_h, fc_gap);
+          
+          // Gräs bar - use parsed forecast level
+          draw_vu_bar(gras_col_x - 45, row_y, grass_levels[d], fc_seg_w, fc_seg_h, fc_gap);
         }
 
         // Legend at bottom
-        int legend_y = 790;
+        int legend_y = 770;
         int legend_x = 30;
         int leg_seg_w = 18;
         int leg_seg_h = 25;
